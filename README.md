@@ -27,6 +27,7 @@ We'll set up the following services in the following order (the order doesn't re
 2. Watson Speech To Text
 3. CloudantDB
 4. Node.js Cloud Foundry App
+5. Cloud Object Storage
 
 _**Before proceeding any further, please log in to your IBM Cloud account, it'll make set up go a lot faster**_.
 
@@ -46,7 +47,8 @@ _**Before proceeding any further, please log in to your IBM Cloud account, it'll
 3. Scroll down and check that the pricing plan you've selected is 'Lite'.
 4. Click 'Create'.
 
-### CloudantDB
+### CloudantDB
+
 #### Creating an instance
 
 1. Create a Speech to Text instance by first clicking [here](https://console.bluemix.net/catalog/services/cloudant)
@@ -58,7 +60,7 @@ _**Before proceeding any further, please log in to your IBM Cloud account, it'll
 
 #### Creating our tables
 
-For our application we require 3 tables - 'index', 'frames', and 'transcripts'. Follow and repeat the next set of instructions to create the needed databases.
+For our application we require 3 databases - 'index', 'frames', and 'transcripts'. Follow and repeat the next set of instructions to create the needed databases.
 
 1. On the left-hand side of your Cloudant DB dashboard, there is a button which looks like three stacked pancakes. Click it.
 2. At the top right of your Cloudant DB dashboard, click 'Create Database'.
@@ -95,10 +97,46 @@ We want to run our app on the cloud, so we'll create a Node.js Cloud Foundry ins
 
 #### Creating an instance
 
-1. Create a Node.js Cloud Foundry instance by clicking [https://console.bluemix.net/catalog/starters/sdk-for-nodejs](here)
+1. Create a Node.js Cloud Foundry instance by clicking [here](https://console.bluemix.net/catalog/starters/sdk-for-nodejs)
 2. Under app name enter something unique and memorable. The app name will be used to make up your URL, so make sure to take note of it!
 3. Under 'Pricing plans' make sure that you have the 'Lite' plan selected and that you have the **256**MB option selected. The app will not run well with less memory than that.
 4. Click the 'Create' button.
+
+### Cloud Object storage
+
+In order to analyse our media files, we need a place to put them where our app can see them. To that end, we'll create a cloud object storage instance that will let us access the files as we need them.
+
+#### Creating an instance
+
+1. Create an object storage instance by clicking[here](https://console.bluemix.net/catalog/services/cloud-object-storage)
+2. In the "Service Name" input, give your instance a unique and memorable name.
+3. Under 'Pricing plans' make sure you have the 'Lite' tier selected, then click "create".
+
+#### Creating a bucket and uploading files
+
+As soon as your storage instance is created, you'll be taken to its dashboard. From here, we can configure a bucket for our storage. We'll need two buckets: 1 for storing the media files that we want to analyse, and one for storing the keyframes that we extract from our videos.
+
+First, we'll create the bucket for storing the files that we want to upload.
+
+1. On the left-hand side of the dashboard there is a menu item titled 'Buckets'. Click it.
+2. In the new view that loads, click the 'Create Bucket' button that appears on the far right of the dashboard. A dialog will open.
+3. Give your bucket a name. These names are shared globally, so you won't be able to have a bucket name that anybody else on the IBM Cloud has. Make sure to take note of the name you give it, as you'll be using it in your code later on.
+4. Once you've chosen a name and a region (note down your region for later) to your liking, click "Create". You'll then be taken to a view where you can upload files and folders.
+5. In the new view, click 'Upload' and then 'Files' and then 'Select Files'. Select any files that you will want to analyse later. Once uploaded, they will appear in the 'Objects' table
+
+Now that we have our bucket for storing the files we want to analyse, we're going to create a bucket that our application will write any keyframes that we extract for later viewing.
+
+Repeat steps 1 - 4 of the previous instructions to create the new bucket, but give it a different name this time around. We're not going to directly upload any files to this bucket, our application will do that for us when we run it.
+
+## Quick Start
+
+If you don't want to copy and paste all of the code below, but just want to play with the application, download the code and run the following inside the '/complete' folder. This a complete, functioning version of the application.
+
+1. run `npm install`
+2. Set up the environment variables as described at the end of this document
+3. Run `npm start`
+4. View the application at http://localhost:3000
+
 
 ## Building our Application
 
@@ -116,10 +154,12 @@ Our application is made up of two views _'analyse'_ and _'search'_. The _'analys
 In this demo application, we have all of the routes set up to deliver our application, but none of the logic for populating our application with content or search capabilites, so we'll do that now.
 
 1. Open this folder in your favourite IDE for editing and open the file `routes/index.js`.
+
 2. In here, you will see all of the routes we have defined for our application. We're going to edit the `GET /analyse`. Look for the code block that has `// GET ANALYSE ROUTE` in it and delete the line reading `res.end()` just after it. We'll be copy and pasting our code in this space for the next little while.
+
 3. Copy and paste the following code on the line after `GET ANALYSE ROUTE`
 ```javaScript
-storage.list()
+storage.list(process.env.COS_MEDIA_ARCHIVE_BUCKET_NAME)
     .then(data => {
         // CODE BLOCK 1
         
@@ -127,6 +167,7 @@ storage.list()
 ;
 ```
 This will access our cloud object storage and get a list of all of the files in our media archive.
+
 4. Next, we want to check whether or not we have any record of this file in our CloudantDB 'index' database. Copy and paste the following code just after the line that reads `CODE BLOCK 1`
 ```javascript
 database.query({
@@ -141,6 +182,7 @@ database.query({
     })
 ;
 ```
+
 5. Once we have those records, we also want to check whether or not these files have been previously transcribed. We can do that by running another query, but this time against our Cloudant DB 'transcript' database. Copy and paste the following code onto the line just after `// CODE BLOCK 2`.
 ```javascript
 return database.query({
@@ -154,6 +196,7 @@ return database.query({
     })    
 ;
 ```
+
 6. We now have records of whether or not our file has ever been processed by our server before, and whether or not they've been transcribed. Now we're going to shape that information so that we can use it to render our 'analyse' view. Copy and paste the following code on the line that reads just after `// CODE BLOCK 3`
 ```javascript
 const itemInfo = data.Contents.map(item => {
@@ -179,7 +222,9 @@ res.render('analyse', {
     item : itemInfo
 });
 ```
-7. We now have all of the code that we need to view our `/analyse` route! But we also need a little bit of JavaScript to make it behave the way we'd like (triggering analysis processes on demand). 
+
+7. We now have all of the code that we need to view our `/analyse` route! But we also need a little bit of JavaScript to make it behave the way we'd like (triggering analysis processes on demand).
+
 8. Find the file `/views/analyse.hbs` and open it for editing. Copy and paste the following code just beneath the line that reads `// CODE BLOCK 1` (in between the `<script>` tags).
 ```javascript
 (function(){
@@ -260,13 +305,15 @@ This code will bind an event listener to the _Analyse_ buttons in the table and 
 So, now we have the code for displaying all of the objects that we can analysis, and all of the code we need to trigger an analysis. Next up, we need the code for actually performing the analysis.
 
 1. Open up the file `/routes/index.js` for editing again.
-2. Find the line that reads `// POST ANALYSE ROUTE` and delete the line that reads `res.end();` just after it.
+
+2. Find the line that reads `// POST ANALYSE ROUTE` and delete the line that reads `res.end()` just after it.
+
 3. On the line just after `// POST ANALYSE ROUTE` copy and paste the following code.
 ```javascript
 const objectName = req.params.OBJECT_NAME;
 debug(objectName);
 
-storage.check(objectName)
+storage.check(objectName, process.env.COS_MEDIA_ARCHIVE_BUCKET_NAME)
     .then(exists => {
         if(exists){
             // CODE BLOCK 4
@@ -283,6 +330,7 @@ storage.check(objectName)
 ;
 ```
 This will check that any file that we want to analyse actually exists before we try to analyse it.
+
 4. Copy and paste the following code just after the line that reads `// CODE BLOCK 4`
 ```javascript
 database.query({
@@ -359,13 +407,14 @@ database.query({
 ;
 ```
 This code checks our 'index' database for a document that tells us whether or not we've analysed the file before. If a document is found, we update the document to read that we're now reanalysing the audio and keyframes of the media object. If not, we create a new object that contains the same information for future analysis.
+
 5. Before we start any analysis, we want to clean up any existing data about the media file so that we can surface only the most recent results in any search. After the line that reads `// CODE BLOCK 5` copy and paste the following code:
 ```javascript
 return Promise.all( [ database.query( { "selector": { "parent": { "$eq": document.uuid } } }, 'frames'), database.query( { "selector": { "parent": { "$eq": document.uuid } } }, 'transcripts') ]  )
     .then(results => {
         debug(results[0]);
         
-        const keyFramesToDelete = storage.deleteMany( results[0].map(document => { return { Key: `${document.uuid}.jpg` } }) );
+        const keyFramesToDelete = storage.deleteMany( results[0].map(document => { return { Key: `${document.uuid}.jpg` } }), process.env.COS_KEYFRAMES_BUCKET_NAME );
         
         const deleteKeyFrameRecordsAndTranscripts = new Promise( (resolve, reject) => {
             
@@ -430,12 +479,13 @@ return Promise.all( [ database.query( { "selector": { "parent": { "$eq": documen
 ;
 ```
 This code will find every transcript and keyframe that belongs to the selected media file and will delete both the objects from our cloud storage and the records from our database. This gives us a nice clean slate to work with.
+
 6. Now that we've cleaned everything up, it's time to start analysing things. First, we'll add a record to our 'index' database saying that we're about to analyse the media object, and then we'll grab the object from storage for analysis. Copy and paste the following code on the line just after `// CODE BLOCK 6`
 ```javascript
 return database.add(document, 'index')
     .then(function(){
 
-        return storage.get(objectName)
+        return storage.get(objectName, process.env.COS_MEDIA_ARCHIVE_BUCKET_NAME)
             .then(data => {
                 debug(data);
 
@@ -454,6 +504,7 @@ return database.add(document, 'index')
     })
 ;
 ```
+
 7. In this part of the code, we're going to start two of the analysis processes - the keyframe extraction and classification, and the audio extraction and transcription. First, we'll add the code for the keyframe analysis and classification. Copy and paste the following code just after `// CODE BLOCK 7`
 ```javascript
 const frameClassification = analyse.frames(data.Body)
@@ -472,7 +523,7 @@ const frameClassification = analyse.frames(data.Body)
                 frameData.uuid = uuid();
                 delete frameData.image;
 
-                const saveFrame = storage.put(`${frameData.uuid}.jpg`, frame.image, 'cos-frames');
+                const saveFrame = storage.put(`${frameData.uuid}.jpg`, frame.image, process.env.COS_KEYFRAMES_BUCKET_NAME);
                 const saveClassifications = new Promise( (resolveA, reject) => {
                     
                     (function(frameData){
@@ -532,7 +583,7 @@ In this block of code, we work through every identified and classified keyframe,
 
 8. Now that we have the code for extracting, analysing and storing our keyframes, it's time for the code that will extract, analyse, and store the transcripts for our media files. On the line just after `// CODE BLOCK 8`, copy and paste the following code:
 ```javascript
-analysis.push(frameClassification);
+
                                                 
 const audioTranscription = analyse.audio(data.Body)
     .then(transcriptionData => {
@@ -583,6 +634,7 @@ Right! We can now analyse media objects. Hurrah! So let's make a simple search e
 We've already got everything we need to get started, so we just need a little more code.
 
 1. Still in the `/routes/index.js` file, find the line that starts with `// GET SEARCH ROUTE` and delete the line that read `res.end()` just after it.
+
 2. Copy and paste the following line just after the line that reads `// GET SEARCH ROUTE`
 ```javascript
 debug(req.body);
@@ -600,6 +652,7 @@ if(req.body.searchTerm === "" || !req.body.searchTerm){
 }
 ```
 Here, we're just making sure that we're actually getting something to search for before we try to query our database. If there's no search query we just reject the request.
+
 3. Once we get something that we can actually look for, we'll put together the database queries to surface some results (if there are any) to the user. Copy and paste the following code after the line that reads `// CODE BLOCK 9`
 ```javascript
 const phrase = req.body.searchTerm.toLowerCase();
@@ -629,6 +682,7 @@ const transcriptSearch = database.query({
 // CODE BLOCK 10
 
 ```
+
 4. Once we have those queries ready to go, we'll fire them off to the database and wait for the results. Copy and paste the following code after the line that reads `// CODE BLOCK 10`.
 ```javascript
 Promise.all( [ keyframeSearch, transcriptSearch ] )
@@ -648,6 +702,7 @@ Promise.all( [ keyframeSearch, transcriptSearch ] )
     })
 ;
 ```
+
 5. It'll take a few seconds for the requests for both the transcripts and the keyframes results to return. Once we have both sets of results, we'll put them to work. Copy and paste the following code just after the line that reads `// CODE BLOCK 11`
 ```javascript
 const uniqueParents = {};
@@ -909,6 +964,7 @@ In order to run the application, we first need to set up some environment variab
 ### Setting up variables locally
 
 1. In the root of your project folder (the folder with the app.js file in it) create a new file called `.env`.
+
 2. Copy and paste the following block of text into your newly created `.env` file and save it.
 
 ```
@@ -918,7 +974,8 @@ COS_ENDPOINT=
 COS_REGION=
 COS_ACCESS_KEY_ID=
 COS_ACCESS_KEY_SECRET=
-COS_DEFAULT_BUCKET=media-assets
+COS_MEDIA_ARCHIVE_BUCKET_NAME=
+COS_KEYFRAMES_BUCKET_NAME=
 
 DATABASE_USERNAME=
 DATABASE_PASSWORD=
@@ -933,15 +990,29 @@ STT_URL=
 
 ### Getting the values for your environment variables
 
-#### Cloud Object Storage
+#### Cloud Object Storage
 
 Variables required:
 1. COS_ENDPOINT
 2. COS_REGION
 3. COS_ACCESS_KEY_ID
 4. COS_ACCESS_KEY_SECRET
+5. COS_MEDIA_ARCHIVE_BUCKET_NAME
+6. COS_KEYFRAMES_BUCKET_NAME
 
-These variables will be given out at the workshop. You can also use credebtials for your own object storage service if you have one set up already (either IBM Cloud Object Storage or AWS S3)
+To get the environment variables to access your cloud object storage, follow these next steps:
+
+1. Go to your [IBM Cloud Dashboard](https://console.bluemix.net/dashboard/apps) and find the storage instance you created at the start of this document. Click to view the instance.
+2. On the left hand side of the screen there is an option 'Service Credentials', click it, and then click 'New Credential' after it appears on the right side of the screen.
+3. Give your credentials a name, and then in the "Add Inline Configuration Parameters (Optional)" text field enter `{"HMAC" : true}`.
+4. Click 'Add'
+5. Your new credentials will appear in the table entitled 'Service Credentials'. Click the 'View credentials' dropdown to view your newly created credentials.
+6. - For the `COS_ENDPOINT` environment variable, enter the endpoint that matches the region you selected. You can find a list of endpoints [here](https://console.bluemix.net/docs/services/cloud-object-storage/basics/endpoints.html#select-regions-and-endpoints)
+- For the `COS_REGION` environment variable, enter the region you selected when you created your buckets.
+- For the `COS_ACCESS_KEY_ID` environment variable, copy and paste the `access_key_id` value from the service credentials 
+- For the `COS_ACCESS_KEY_SECRET` environment variable, copy and paste the `secret_access_key` value from the service credentials 
+- For the `COS_MEDIA_ARCHIVE_BUCKET_NAME` environment variable, enter the name you gave for the bucket you created to store your media files in
+- For the `COS_KEYFRAMES_BUCKET_NAME` environment variable, enter the name you gave the second bucket you created for storing the keyframes
 
 #### Cloudant DB 
 
